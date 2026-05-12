@@ -1,0 +1,1 @@
+The sales data set contains game name, release date, publisher, developer, and sales data for each game (Bakikhan, 2023). The metacritic dataset contains video games name, release date, critic rating scores, and user rating scores from metacritic (Román,2025).
