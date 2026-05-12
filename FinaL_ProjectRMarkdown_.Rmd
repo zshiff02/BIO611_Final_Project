@@ -1,0 +1,422 @@
+---
+title: "BIO 611 Final Project"
+author: "Zelda Shifflett"
+date: "2026-05-09"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading in packages. 
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse) # Used for data manipulation, transformation, and plotting
+library(janitor) # Used to clean column names (e.g., make them lowercase,
+#remove spaces). Helps standardize for easier merging
+library(lubridate) # Used for working with dates, easier extraction of 
+# date components (e.g., year)
+library(ggrepel) # Prevents overlapping text labels in scatterplots 
+#for better readability
+```
+
+## Reading in datasets.
+The sales data set contains game name, release date, publisher, developer, and sales data for each game (Bakikhan, 2023). The metacritic dataset contains video games name, release date, critic rating scores, and user rating scores from metacritic (Román,2025).
+
+```{r reading in data}
+metacritic<- read.csv("E:/Data611/Final_Idea/ProjectData/metacritic_dataset_.csv")
+sales<- read.csv("E:/Data611/Final_Idea/ProjectData/Video_Game_sales.csv")
+```
+
+## Cleaning up the metacritic dataset
+```{r clean metacritic, warning=FALSE, message = FALSE}
+#Change column names to be easier to work with in R and format of release date 
+#to year, month, and day.Then making year to focus on just the year of release.
+#Making sure scores are numeric values and dropping the NA rows.  
+metacritic1 <- metacritic %>%
+  clean_names() %>%
+  mutate(
+    release_date = ymd(release_date),
+    year = year(release_date),
+    metascore = as.numeric(metascore),
+    user_score = as.numeric(user_score)
+  ) %>%
+  drop_na(metascore, user_score)
+
+# Critic scores are made on a scale of 0-100, while user scores are 0-10. 
+#To make them comparable user scores are multiplied by 10 so that they have
+#the same scale. 
+metacritic2 <- metacritic1 %>%
+  mutate( user_score_100 = user_score * 10)
+
+#Calculate disagreement between user and critic scores.
+metacritic3 <- metacritic2 %>%
+  mutate( score_diff = metascore - user_score_100)
+```
+
+## Exploring the data
+### Histogram (1)
+First getting a genral look at the distribtion of score differences.
+```{r}
+#histogram of score difference distribution
+ggplot(metacritic3, aes(x = score_diff)) +
+  geom_histogram(bins = 50) +
+  labs(title = "Distribution of Critic - User Score Differences")
+```
+Figure 1. Histogram of critc and user score differences.
+
+### Scatterplot (2).
+Visualize generally whether critic and user scores agree. Generally, ratings are similar but discrepancies are visible as well. 
+```{r, message=FALSE, warning=FALSE}
+ggplot(metacritic3, aes(x = metascore, y = user_score_100)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "lm") +
+  labs(
+    x = "Metascore (Critic)",
+    y = "User Score"
+  )
+```
+Figure 2. Scatterplot comparing critic metascore to user score in the same scale of 0-100.
+
+## Incorporating sales data.
+First cleaning and merging the data.
+```{r, message=FALSE, warning=FALSE}
+#Making column names easier to work with in R and making them match the 
+#metacritic data.Select variables needed for analysis.
+sales_clean <- sales %>%
+  clean_names() %>%
+  mutate(
+    name = tolower(name),
+    platform = tolower(platform)
+  ) %>%
+  select(name, platform, global_sales)
+
+#Merge metacritic3 and sales_clean, keeping everything from metacritic3 and 
+# adding matching sales information. 
+merged_sales <- metacritic3 %>%
+  left_join(sales_clean, by = c("name", "platform"))
+```
+
+## Look for discrepancies
+Identifying games with the larges discagreement between users and critics. 
+```{r, message=FALSE, warning=FALSE}
+#Getting an absolute value of score differences and sorting games
+#in descending order.
+#Selecting variables of interest and keeping the top 10 games.  
+top_discrep_with_sales <- merged_sales %>%
+  mutate(abs_diff = abs(score_diff)) %>%
+  arrange(desc(abs_diff)) %>%
+  select(name, platform, metascore, user_score_100, score_diff, global_sales) %>%
+  head(10)
+```
+
+
+## Looking at sales data for publishers that released top 10 high discrepancy games (3).
+```{r, message=FALSE, warning=FALSE}
+#Cleaning for this data set again to ensure column names are consistent
+# and year of release is numeric. 
+sales_publishers <- sales %>%
+  clean_names() %>%
+  mutate(
+    year_of_release = as.numeric(year_of_release)
+  )
+
+# Filtering to focus on the publishers with games that had
+#large discrepancies in scores. 
+publisher_focus <- sales_publishers %>%
+  filter(publisher %in% c(
+    "Ubisoft",
+    "Electronic Arts",
+    "Square Enix",
+    "Activision"
+  ))
+
+#Summarize the total global sales by publisher and year. 
+publisher_year_sales <- publisher_focus %>%
+  group_by(publisher, year_of_release) %>%
+  summarise(
+    total_sales = sum(global_sales, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#Plot to show each publishers sales overtime. With points at
+#specific year values and connecting trend lines for each publishing company. 
+ggplot(publisher_year_sales,
+       aes(x = year_of_release,
+           y = total_sales,
+           color = publisher)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(
+    x = "Year",
+    y = "Global Sales (Millions)"
+  )
+
+```
+Figure 3. Line graph of global sales each year for four publishing companies with multiple high score discrepancy games. 
+
+After examining the sales graph above, a decline in global sales appears to follow the release years associated with games that show high score discrepancies between critics and users. The sales data only extends through 2020, while several of the top 10 most discrepant games were released after this period (e.g., Diablo IV, FIFA 21, and EA Sports FC 24). As a result, including some additional games from these earlier years helps provide more data points to incorporate available sales information.
+
+## Plotting specific disagreement games (4)
+```{r, message=FALSE, warning=FALSE}
+# Defining games of interest
+key_games <- c(
+  "tom clancy's the division 2",
+  "lostwinds: winter of the melodias",
+  "diablo iv",
+  "nba 2k18",
+  "the sims 4",
+  "dragon age ii",
+  "assassin's creed unity",
+  "nier"
+)
+
+# Filter dataset to only include selected games
+focus_df <- metacritic3 %>%
+  filter(tolower(name) %in% key_games)
+
+# Plot critic vs user scores for selected games. 
+#Individual games as points.Color value to represent score disagreement,
+#with dark blue showing the highest discrepancy. 
+#Including labels of game name and release year to show year.
+ggplot(focus_df, aes(x = metascore, y = user_score_100)) +
+  geom_point(aes(color = metascore - user_score_100), size = 3) +
+  geom_text_repel(
+    aes(label = paste0(name, " (", year, ")")),
+    size = 3,
+    max.overlaps = Inf
+  ) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_gradient2(
+    low = "red",
+    mid = "grey80",
+    high = "blue"
+  ) +
+  labs(
+    x = "Metascore (Critics)",
+    y = "User Score (0–100)",
+    color = "Critic - User"
+  ) +
+  theme_minimal()
+
+```
+Figure 4. Scatterplot showing two high-discrepancy games from each publisher, with critic Metascores (x-axis) and user scores (y-axis), including game titles and year of release. Color indicating the size of the discrepancy and whether critics or users rated the game higher. 
+
+Each point in the plot represents an individual game. However, some games appear multiple times because they were released across different platforms. Scores were intentionally not merged across platforms because score discrepancies may be meaningful at the platform level. In some cases, performance, optimization, or game play experience can differ substantially between platforms, effectively resulting in a different user experience for the same title. An example of this in the figure is NBA 2K18, where points are spread out.
+
+Additionally, the years represented generally show a decline in sales following the release of these games with large critic–user score discrepancies.The games selected based on observed dips in the sales graph also happened to have a notable score discrepancy, supporting the idea that score disagreement may be associated with market performance.
+
+## Highlighting years controversial games were released in sales graph (5)
+```{r message=FALSE, warning=FALSE}
+#selecting years of controversial games
+publisher_year_sales_highlight <- publisher_year_sales %>%
+  mutate(
+    highlight = case_when(
+      publisher == "Square Enix" & year_of_release %in% c(2010) ~ "Highlight",
+      publisher == "Electronic Arts" & year_of_release %in% c(2011, 2014) ~ "Highlight",
+      publisher == "Activision" & year_of_release == 2009 ~ "Highlight",
+      publisher == "Ubisoft" & year_of_release == 2014 ~ "Highlight",
+      TRUE ~ "Normal"
+    )
+  )
+#same as sales plot but includes points at years of
+#controversial game releases. 
+ggplot(publisher_year_sales_highlight,
+       aes(x = year_of_release,
+           y = total_sales,
+           color = publisher)) +
+  
+  geom_line(linewidth = 1) +
+  
+  geom_point(size = 2) +
+  geom_point(
+    data = subset(publisher_year_sales_highlight,
+                  highlight == "Highlight"),
+    size = 3,
+    shape = 21,
+    fill = "yellow",
+    color = "black",
+    stroke = 1.2
+  ) +
+  labs(
+    x = "Year",
+    y = "Global Sales (Millions)"
+  ) +
+  theme_minimal()
+```
+Figure 5. Global sales (in millions) from 1980 to 2020, with trends shown for four publishing companies over time. Yellow points highlight the release years of high-discrepancy games.
+
+## Similar examination with games rated highly by users (6)
+Revisiting the sales graph, I focused on peak sales years and identified games that are generally well-received by users within each publisher. From there, I examined whether these higher-performing titles showed closer alignment between critic and user scores.
+
+```{r, message=FALSE, warning=FALSE}
+#selecting games released on peak sales years
+agree_games <- c(
+  "dragon age: origins",
+  "nier", 
+  "guitar hero iii: legends of rock", 
+  "assassin's creed ii",
+  "assassin's creed: rogue",
+  "mass effect",
+  "just cause 2"
+)
+
+# Filter dataset to only include selected games
+agree_df <- metacritic3 %>%
+  filter(tolower(name) %in% agree_games)
+
+# Create plot comparing critic and user scores for selected games. 
+#Each game plotted as a point with colors to show disagreement.
+#Red showing critic lower than player, blue critic higher than
+#player, and grey as general agreement. Includes a reference line. 
+#Label added to each point for game and release year. 
+ggplot(agree_df, aes(x = metascore, y = user_score_100)) +
+  geom_point(aes(color = metascore - user_score_100), size = 3) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  geom_text_repel(
+    aes(label = paste0(name, " (", year, ")")),
+    size = 3,
+    max.overlaps = Inf
+  ) +
+  scale_color_gradient2(
+    low = "red",
+    mid = "grey80",
+    high = "blue"
+  ) +
+  labs(
+    x = "Metascore (Critics)",
+    y = "User Score (0–100)",
+    color = "Critic - User"
+  ) +
+  theme_minimal()
+```
+Figure 6. Scatterplot showing games from each publisher released during high-earning sales years, with critic Metascores (x-axis) and user scores (y-axis), including game titles and year of release. Color indicates the size of the score discrepancy and whether critics or users rated the game higher.
+
+There appears to be greater overall alignment between critic and user scores for these high-performing games released during peak sales years. However, NIER depicts an interesting case where users rated a game much higher than critics. This plot also highlights potential platform-related variability, particularly in the case of Guitar Hero III: Legends of Rock. This variation is expected given the game’s strong reliance on a specialized controller.
+
+## Looking at original scatterplot with discrepancies highlighted (7)
+```{r, message=FALSE, warning=FALSE}
+# selecting high discrepancy games to highlight from developer,
+#including more games since it will not crowd the plot as much.
+key_games <- c(
+  "tom clancy's the division 2",
+  "lostwinds: winter of the melodias",
+  "diablo iv",
+  "nba 2k18",
+  "the sims 4",
+  "dragon age ii",
+  "assassin's creed unity",
+  "nier",
+  "fifa 21",
+  "call of duty: modern warfare 3"
+  )
+
+#making seperate dataset that highlights the key games 
+#and makes it so non key games are background points
+metacritic4 <- metacritic3 %>%
+  mutate(
+    highlight = ifelse(tolower(name) %in% key_games, name, NA)
+  )
+    
+#plot that creates points for the non highlighted games. 
+#Includes a line, then makes points for the highlighted key games and
+#assigning each a color.         
+ggplot(metacritic4, aes(x = metascore, y = user_score_100)) +
+  geom_point(alpha = 0.2, color = "grey60") +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_point(
+    data = subset(metacritic4, !is.na(highlight)),
+    aes(color = highlight),
+    size = 3
+  ) +
+  labs(
+    x = "Metascore (Critics)",
+    y = "User Score (0–100)",
+    color = "Selected Games"
+  ) +
+  theme_minimal()
+
+```
+Figure 6. Scatterplot comparing critic metascores and user scores highlighting games with high discrepancies form the four publishing companies. 
+
+The scatterplot above visually highlights and identifies high-discrepancy games, focusing on titles from four developers that each have multiple instances of large differences between critic and user scores.
+
+## Statistics
+Scores paired t-test
+```{r, message = FALSE, warning = FALSE}
+#Paired t-test comparing critic and user scores for the same games.
+#Checks whether there is a statistically significant difference between
+#metascore (critics) and user scores in the same 0- 100 scale.
+#Paired because each score refers to the same game.
+t.test(metacritic3$metascore, metacritic3$user_score_100, paired = TRUE)
+```
+Results from the paired t-test comparing critic and user scores show a statistically difference between the two groups (t= = 40.97,df = 22223, p < 2.2e-16). The mean difference between scores was 3.52 points, with a 95% confidence interval ranging from 3.35 to 3.68. Indicating that critic scores are slightly higher than user scores on average. Although the overall sizeof the difference is relatively small, the low p-value suggests that this difference is consistent across the dataset.
+## Sales t-test comparing sales between games with high disagreement scores and more agreed scores. 
+```{r, message = FALSE, warning=FALSE}
+#merged dataset (I repeat steps like this because it helps me stay organized) 
+#keeping names lowercase so everything matches correctly across datasets
+merged_sales3 <- metacritic3 %>%
+  mutate(name = tolower(name)) %>%
+  left_join(
+    sales_clean %>%
+      mutate(name = tolower(name)) %>%
+      select(name, global_sales),
+    by = "name"
+  )
+
+#Cleaning to remove NAs, create disagreement groups for group comparrison.
+metacritic5_clean <- merged_sales3 %>%
+  filter(!is.na(global_sales)) %>%
+  mutate(
+    disagreement_group = ifelse(
+      abs(score_diff) > median(abs(score_diff), na.rm = TRUE),
+      "High Disagreement",
+      "Low Disagreement"
+    )
+  )
+
+#two sample t-test. Comparing global sales for high disagreement 
+#and low disagreement games
+t.test(global_sales ~ disagreement_group, data = metacritic5_clean)
+```
+A Welch two-sample t-test was conducted to compare mean global sales between games with high disagreement and low disagreement between critic and user scores. The results show a statistically significant difference in mean global sales between the two groups (t = 2.945, df = 17776, p = 0.0032).
+
+Games in the high-disagreement group had a higher average global sales value (M = 0.845) compared to the low-disagreement group (M = 0.768). The 95% confidence interval for the difference in means ranged from 0.026 to 0.127 million dollars.Suggesting that games with greater divergence between critic and user evaluations are associated with slightly higher global sales on average.
+
+This may connect to the idea that strong early promotional critic reviews may influence consumer purchasing behavior, particularly due to incentives to pre-order, increasing sales for that particular game despite it not aligning with the user's actual expectations. 
+
+
+## Final Reflections.
+
+### 1. Rank your visualizations from 1-5 (or more) in the order in which you would like them to be evaluated
+In order of highest priority to lowest priority: Figure 7, Figure 3, Figure 4, Figure 6, and Figure 5.
+ 
+### 2. Which visualizations, if any, were you most pleased with creating and why?
+I was most pleased with Figure 6 because it brought me back to the original scatterplot and allowed me to identify specific games within the broader visual. It felt like a nice tie together after looking at everything else. 
+
+### 3. Did you have any issues accessing the data for your project? How did you resolve these?
+I didn’t really have issues accessing the data, but working with it took some effort because the formatting was inconsistent across datasets and there were quite a few NA values. I resolved this though by cleaning variable names, standardizing formats, and removing the missing values.
+
+### 4. How did your project topic evolve from what you first envisioned, and why?
+I think my project topic became more focused compared to what I originally thought. At first, I planned to examine score discrepancies more broadly across many games, but the visualizations became too crowded. I also noticed that many of the top discrepancy games came from the same developers, which led me to narrow the analysis toward the top 10 discrepancy cases and specific publishers. As the project developed, I also found it interesting to examine sales trends over time and seeing periods where highly discrepant games corresponded with change in sales performance in Figure 3.
+
+### 5. Did you have issues related to any analyses that you performed, the timeline of the project, your computer or other tools necessary, etc?  How did you resolve or workaround these issues?
+I did not run into major issues with the analyses themselves or the overall project timeline. My home computer is a gaming PC and handled the datasets without problems. However, my laptop is older and struggled to run some of the analyses and visualizations reliably. To work around this, I primarily completed the coding work on my home PC and regularly saved files to a flash drive so I could still see saved outputs and visualizations while working on the writing for the Story Map at school.
+
+Another minor challenge occurred when Canvas temporarily went down and I could not access the project rubric. Once Canvas became available again the next day, I downloaded the rubric though. Overall, these problems were manageable and did not significantly impact the completion of the project.
+
+### 6. If you had more time, what would you change (e.g., things you might 
+add or remove)?
+I really liked the topic I chose for this project, and if I had more time I think the biggest thing I would change would be reducing some of the repetition in my workflow and code organization. Since I was balancing multiple final projects at the same time, many of which also involved working in R, I often repeated steps either because I forgot I had already completed them or because redoing parts of the workflow helped me keep track of everything during each work session. While repetitive in places, this approach helped me stay organized while juggling multiple projects simultaneously.
+
+Given more time, I also would have liked to investigate the reasons behind some of the observed score discrepancies in greater depth. This could have helped further evaluate ideas discussed in the StoryMap, such as whether critic scores may sometimes be influenced by financial relationships or promotional pressures. At the same time, there may also be less controversial reasons for discrepancies, such as platform optimization issues. In other cases, user score discrepancies may reflect protest toward a company itself, with scoring directed at particular publishers. I briefly considered this in relation to companies like Konami but did not fully explore within this project.
+
+### 7. Are you happy with the final results of your project?
+I always feel like there is more that I could add or improve, but overall I am happy with the final results of the project. I enjoyed the topic and found the analysis process genuinely interesting. Some of my friends I told about the project found the topic and findings interesting as well, so it was fun to talk about. 
+
+### 8. May I use your project and/or visualizations as an example for later 
+classes? If so, would you like me to redact your name?
+Yes, I do not mind if my name is included if you decide to use it.
+
+### 9. What advice would you give to future students taking this course?
+My advice to future students would be to practice by doing something fun to practice occasionally. My partner and I both use R, and we sometimes created visualizations with silly themes to compare. This made practicing more enjoyable and helped reinforce the skills.
